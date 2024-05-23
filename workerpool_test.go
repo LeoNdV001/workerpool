@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeoNdV001/workerpool/task"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/LeoNdV001/workerpool/task"
 )
 
 // WorkerPoolTestSuite encapsulates the tests
