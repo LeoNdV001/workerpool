@@ -20,7 +20,7 @@ func NewSimpleExample(wpm workerpool.InterfaceManager) *SimpleExample {
 
 // SimplePool creates a new WorkerPool instance
 func (e *SimpleExample) SimplePool(ctx context.Context, numberOfTasks uint) error {
-	wp := e.wpm.NewWorkerPool(ctx).UseDefaults().Start()
+	wp := e.wpm.NewWorkerPool(ctx).Start()
 	defer wp.Quit()
 
 	for i := range numberOfTasks {

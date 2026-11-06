@@ -7,6 +7,8 @@ import (
 // InterfaceWorkerPool is the interface implemented by WorkerPool
 type InterfaceWorkerPool interface {
 	// UseDefaults sets the default values for the WorkerPool
+	//
+	// Deprecated: NewWorkerPool already applies the defaults.
 	UseDefaults() InterfaceWorkerPool
 	// GetBufferSize returns the buffer size of the WorkerPool
 	GetBufferSize() uint
@@ -14,19 +16,21 @@ type InterfaceWorkerPool interface {
 	WithBufferSize(bufferSize uint) InterfaceWorkerPool
 	// GetWorkers returns the number of workers of the WorkerPool
 	GetWorkers() uint
-	// WithWorkers sets the workers size of the WorkerPool
+	// WithWorkers sets the workers size of the WorkerPool (minimum 1)
 	WithWorkers(workers uint) InterfaceWorkerPool
-	// Start initializes the WorkerPool for processing tasks
+	// Start launches the workers; a no-op while the pool is running
 	Start() InterfaceWorkerPool
-	// AddTask adds a tasks to the WorkerPool
+	// AddTask queues a task; errors if the pool is not running or its context is done
 	AddTask(t task.InterfaceTask) error
-	// Await waits until all tasks have been processed. Make sure to
-	// call the done function in order for the error channel to be closed.
+	// Await blocks until all tasks have been processed (call Done first) or the
+	// context is done, and returns the task errors joined
 	Await() error
-	// Done indicate that all tasks have been published and close the tasks channel.
+	// Done indicates that all tasks have been added
 	Done()
-	// Reset resets the WorkerPool to its initial state
+	// Reset waits for queued tasks, clears collected errors and starts again.
+	// Never call it from inside a task: it deadlocks.
 	Reset()
-	// Quit gracefully shuts down the WorkerPool
+	// Quit stops accepting tasks and blocks until all workers have exited.
+	// Never call it from inside a task: it deadlocks.
 	Quit()
 }

@@ -2,263 +2,227 @@ package workerpool
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
+	"strings"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
-	"github.com/stretchr/testify/suite"
-
-	"github.com/LeoNdV001/workerpool/task"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// WorkerPoolTestSuite encapsulates the tests
-type WorkerPoolTestSuite struct {
-	suite.Suite
-	ctx   context.Context
-	tasks []task.InterfaceTask
+var errBoom = errors.New("boom")
+
+// recorder collects task outcomes from concurrent workers
+type recorder struct {
+	mu        sync.Mutex
+	succeeded []string
+	failed    int
 }
 
-// TestTask is a simple task object
-type TestTask struct {
-	Name    string
-	Err     error
-	Results *[]string
-	T       *testing.T
+// testTask sleeps for delay, then returns err
+type testTask struct {
+	name  string
+	err   error
+	delay time.Duration
+	rec   *recorder
 }
 
-// Execute handles the business logic of the task
-func (t *TestTask) Execute(_ context.Context) error {
-	return t.Err
+func (t *testTask) Execute(_ context.Context) error {
+	time.Sleep(t.delay)
+
+	return t.err
 }
 
-// OnSuccess is called when the task has been executed successfully
-func (t *TestTask) OnSuccess(_ context.Context) {
-	if t.Results != nil {
-		*t.Results = append(*t.Results, t.Name)
-	}
+func (t *testTask) OnSuccess(_ context.Context) {
+	t.rec.mu.Lock()
+	defer t.rec.mu.Unlock()
+
+	t.rec.succeeded = append(t.rec.succeeded, t.name)
 }
 
-// OnFailure is called when the task has failed
-func (t *TestTask) OnFailure(_ context.Context, _ error) {}
+func (t *testTask) OnFailure(_ context.Context, _ error) {
+	t.rec.mu.Lock()
+	defer t.rec.mu.Unlock()
 
-// NewTask creates a new task object
-func (test *WorkerPoolTestSuite) NewTask(name string, err error) task.InterfaceTask {
-	return &TestTask{
-		Name: name,
-		Err:  err,
-		T:    test.T(),
-	}
+	t.rec.failed++
 }
 
-// SetupTest sets up often used objects (for every test)
-func (test *WorkerPoolTestSuite) SetupTest() {
-	test.T().Helper()
-	test.ctx = context.TODO()
-	test.tasks = make([]task.InterfaceTask, 0)
-
-	for i := range 500 {
-		test.tasks = append(test.tasks, test.NewTask(fmt.Sprintf("task-%d\n", i), nil))
-	}
-}
-
-// TearDownTest tests whether the mock has been handled correctly after each test
-func (test *WorkerPoolTestSuite) TearDownTest() {
-	os.Clearenv()
-	test.ctx.Done()
-}
-
-// TestWorkerPoolTestSuite Runs the testsuite
-func TestWorkerPoolTestSuite(t *testing.T) {
+func TestProcessesAllTasks(t *testing.T) {
 	t.Parallel()
-	suite.Run(t, new(WorkerPoolTestSuite))
-}
 
-// TestNewDefaultWorkerPool tests the NewWorkerPool function with a simple task object
-func (test *WorkerPoolTestSuite) TestNewDefaultWorkerPool() {
-	ctx, c := context.WithTimeout(test.ctx, 5*time.Second)
-	defer c()
-
-	workerPool := NewWorkerPool(ctx).UseDefaults().Start()
-	test.NotNil(workerPool)
-
-	defer workerPool.Quit()
-
-	go func() {
-		for i := range test.tasks {
-			err := workerPool.AddTask(test.tasks[i])
-			test.Nil(err)
-		}
-
-		// added all the jobs
-		workerPool.Done()
-	}()
-
-	test.Nil(workerPool.Await())
-}
-
-// TestWorkerPoolOptions tests the WorkerPool with custom options
-func (test *WorkerPoolTestSuite) TestWorkerPoolOptions() {
-	ctx, c := context.WithTimeout(test.ctx, 5*time.Second)
-	defer c()
-
-	workerPool := NewWorkerPool(ctx).
-		WithBufferSize(10).
-		WithWorkers(5).
-		Start()
-
-	defer workerPool.Quit()
-
-	test.NotNil(workerPool)
-	test.Equal(uint(10), workerPool.GetBufferSize())
-	test.Equal(uint(5), workerPool.GetWorkers())
-
-	go func() {
-		for i := range test.tasks {
-			err := workerPool.AddTask(test.tasks[i])
-			test.Nil(err)
-		}
-
-		// added all the jobs
-		workerPool.Done()
-	}()
-
-	test.Nil(workerPool.Await())
-}
-
-// TestWorkerPoolUnbufferedSingleWorker tests the WorkerPool with custom options
-func (test *WorkerPoolTestSuite) TestWorkerPoolUnbufferedSingleWorker() {
-	ctx, c := context.WithTimeout(test.ctx, 5*time.Second)
-	defer c()
-
-	workerPool := NewWorkerPool(ctx).
-		WithBufferSize(0).
-		WithWorkers(0).
-		Start()
-
-	defer workerPool.Quit()
-
-	test.NotNil(workerPool)
-	test.Equal(uint(0), workerPool.GetBufferSize())
-	test.Equal(uint(1), workerPool.GetWorkers())
-
-	go func() {
-		for i := range test.tasks {
-			err := workerPool.AddTask(test.tasks[i])
-			test.Nil(err)
-		}
-
-		// added all the jobs
-		workerPool.Done()
-	}()
-
-	test.Nil(workerPool.Await())
-}
-
-// TestWorkerPoolWorkerReset tests the WorkerPool with custom options
-func (test *WorkerPoolTestSuite) TestWorkerPoolWorkerResetAndResults() {
-	ctx, c := context.WithTimeout(test.ctx, 5*time.Second)
-	defer c()
-
-	workerPool := NewWorkerPool(ctx).
-		WithBufferSize(0).
-		WithWorkers(0).
-		Start()
-
-	defer workerPool.Quit()
-
-	test.NotNil(workerPool)
-	test.Equal(uint(0), workerPool.GetBufferSize())
-	test.Equal(uint(1), workerPool.GetWorkers())
-
-	results := make([]string, 0)
-
-	for i := range test.tasks {
-		t := test.tasks[i].(*TestTask)
-		t.Results = &results
-
-		err := workerPool.AddTask(t)
-		test.Nil(err)
+	tests := map[string]struct {
+		pool            func(InterfaceWorkerPool) InterfaceWorkerPool
+		workers, buffer uint
+	}{
+		"defaults":   {func(p InterfaceWorkerPool) InterfaceWorkerPool { return p }, 10, 100},
+		"custom":     {func(p InterfaceWorkerPool) InterfaceWorkerPool { return p.WithBufferSize(10).WithWorkers(5) }, 5, 10},
+		"unbuffered": {func(p InterfaceWorkerPool) InterfaceWorkerPool { return p.WithBufferSize(0).WithWorkers(0) }, 1, 0},
 	}
 
-	workerPool.Reset()
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	err := workerPool.AddTask(test.tasks[0])
-	test.Nil(err)
+			rec := &recorder{}
+			wp := tt.pool(NewWorkerPool(t.Context())).Start()
+			defer wp.Quit()
 
-	workerPool.Done()
+			assert.Equal(t, tt.workers, wp.GetWorkers())
+			assert.Equal(t, tt.buffer, wp.GetBufferSize())
 
-	test.Nil(workerPool.Await())
-	test.Len(results, 501)
-	test.Equal("task-0\n", results[0])
-	test.Equal("task-0\n", results[len(results)-1])
+			go func() {
+				for i := range 500 {
+					assert.NoError(t, wp.AddTask(&testTask{name: fmt.Sprint(i), rec: rec}))
+				}
+
+				wp.Done()
+			}()
+
+			require.NoError(t, wp.Await())
+			assert.Len(t, rec.succeeded, 500)
+		})
+	}
 }
 
-// TestWorkerPoolOptions tests the WorkerPool with custom options
-func (test *WorkerPoolTestSuite) TestWorkerPoolOnFailure() {
-	var (
-		expectedError = fmt.Errorf("expected error")
-		err, taskErr  error
-	)
+// Failing tasks must not block workers when nobody is in Await yet.
+func TestCollectsErrorsWithoutConcurrentAwait(t *testing.T) {
+	t.Parallel()
 
-	ctx, c := context.WithTimeout(test.ctx, 5*time.Second)
-	defer c()
+	synctest.Test(t, func(t *testing.T) {
+		rec := &recorder{}
+		wp := NewWorkerPool(t.Context()).WithWorkers(2).WithBufferSize(0).Start()
+		defer wp.Quit()
 
-	workerPool := NewWorkerPool(ctx).UseDefaults().Start()
-	test.NotNil(workerPool)
-
-	defer workerPool.Quit()
-
-	go func() {
-		for i := range 500 {
-			err = nil
-			if i%50 == 0 {
-				err = expectedError
+		for i := range 100 {
+			var err error
+			if i%10 == 0 {
+				err = errBoom
 			}
 
-			taskErr = workerPool.AddTask(test.NewTask(fmt.Sprintf("task-%d\n", i), err))
-			test.Nil(taskErr)
+			require.NoError(t, wp.AddTask(&testTask{name: fmt.Sprint(i), err: err, rec: rec}))
 		}
 
-		// added all the jobs
-		workerPool.Done()
-	}()
+		wp.Done()
 
-	err = workerPool.Await()
-	test.NotNil(err)
-	test.Equal("expected error\nexpected error\nexpected error\nexpected error\nexpected error\n"+
-		"expected error\nexpected error\nexpected error\nexpected error\nexpected error", err.Error())
+		err := wp.Await()
+		require.ErrorIs(t, err, errBoom)
+		assert.Equal(t, 10, strings.Count(err.Error(), "boom"))
+		assert.Equal(t, 10, rec.failed)
+		assert.Len(t, rec.succeeded, 90)
+	})
 }
 
-// TestWorkerPoolContextCanceled tests the WorkerPool with a canceled context
-func (test *WorkerPoolTestSuite) TestWorkerPoolContextCanceled() {
-	ctx, c := context.WithTimeout(test.ctx, time.Millisecond)
-	defer c()
+func TestContextCanceled(t *testing.T) {
+	t.Parallel()
 
-	workerPool := NewWorkerPool(ctx).UseDefaults().Start()
-	test.NotNil(workerPool)
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
 
-	go func() {
-		err := workerPool.AddTask(test.NewTask(fmt.Sprintf("task-%d\n", 1), nil))
-		test.Nil(err)
-	}()
+		wp := NewWorkerPool(ctx).WithBufferSize(0).Start()
+		defer wp.Quit()
 
-	err := workerPool.Await()
-	test.NotNil(err)
-	test.Contains(err.Error(), ErrContextCanceled)
+		// Done is never called, so only the deadline can end Await.
+		err := wp.Await()
+		require.ErrorIs(t, err, ErrContextCanceled)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+
+		// Workers are gone; AddTask must fail instead of blocking forever.
+		require.ErrorIs(t, wp.AddTask(&testTask{rec: &recorder{}}), ErrContextCanceled)
+	})
 }
 
-// TestWorkerPoolCantAddJobToFinishedPool tests the WorkerPool with a canceled context
-func (test *WorkerPoolTestSuite) TestWorkerPoolCantAddJobToFinishedPool() {
-	ctx, c := context.WithTimeout(test.ctx, 5*time.Second)
-	defer c()
+func TestAddTaskWhenNotRunning(t *testing.T) {
+	t.Parallel()
 
-	workerPool := NewWorkerPool(ctx).UseDefaults().Start()
-	test.NotNil(workerPool)
+	wp := NewWorkerPool(t.Context())
+	require.ErrorIs(t, wp.AddTask(&testTask{}), ErrResultsAlreadyRead, "before Start")
 
-	workerPool.Done()
+	wp.Start().Done()
+	require.ErrorIs(t, wp.AddTask(&testTask{}), ErrResultsAlreadyRead, "after Done")
+}
 
-	err := workerPool.AddTask(test.NewTask(fmt.Sprintf("task-%d\n", 1), nil))
-	test.NotNil(err)
-	test.Contains(err.Error(), ErrResultsAlreadyRead)
+func TestResetDrainsAndRestarts(t *testing.T) {
+	t.Parallel()
+
+	rec := &recorder{}
+	wp := NewWorkerPool(t.Context()).WithBufferSize(0).WithWorkers(0).Start()
+	defer wp.Quit()
+
+	for i := range 500 {
+		require.NoError(t, wp.AddTask(&testTask{name: fmt.Sprint(i), rec: rec}))
+	}
+
+	wp.Reset()
+	require.NoError(t, wp.AddTask(&testTask{name: "after-reset", rec: rec}))
+	wp.Done()
+
+	require.NoError(t, wp.Await())
+	require.Len(t, rec.succeeded, 501)
+	assert.Equal(t, "0", rec.succeeded[0])
+	assert.Equal(t, "after-reset", rec.succeeded[500])
+}
+
+func TestResetClearsErrors(t *testing.T) {
+	t.Parallel()
+
+	wp := NewWorkerPool(t.Context()).Start()
+	defer wp.Quit()
+
+	require.NoError(t, wp.AddTask(&testTask{err: errBoom, rec: &recorder{}}))
+	wp.Reset()
+	wp.Done()
+
+	require.NoError(t, wp.Await())
+}
+
+func TestQuitWaitsForWorkers(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		rec := &recorder{}
+		wp := NewWorkerPool(t.Context()).WithWorkers(3).Start()
+
+		for range 9 {
+			require.NoError(t, wp.AddTask(&testTask{delay: time.Second, rec: rec}))
+		}
+
+		start := time.Now()
+		wp.Quit()
+
+		assert.Equal(t, 3*time.Second, time.Since(start))
+		assert.Len(t, rec.succeeded, 9)
+
+		wp.Quit() // second call is a no-op
+	})
+}
+
+// Run with -race: AddTask racing Done must never panic with "send on closed channel".
+func TestConcurrentAddTaskAndDone(t *testing.T) {
+	t.Parallel()
+
+	rec := &recorder{}
+	wp := NewWorkerPool(t.Context()).WithBufferSize(1).Start()
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
+				err := wp.AddTask(&testTask{rec: rec})
+				if err != nil {
+					assert.ErrorIs(t, err, ErrResultsAlreadyRead)
+
+					return
+				}
+			}
+		})
+	}
+
+	wp.Done()
+	wg.Wait()
+	require.NoError(t, wp.Await())
 }

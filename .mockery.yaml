@@ -1,0 +1,18 @@
+---
+all: true
+dir: "_mocks/{{.InterfaceDirRelative}}"
+filename: "{{.InterfaceName}}.go"
+force-file-write: true
+include-auto-generated: true
+formatter: "goimports"
+log-level: "warn"
+structname: "{{.InterfaceName}}"
+pkgname: '{{.SrcPackageName}}'
+recursive: true
+template: testify
+packages:
+  github.com/LeoNdV001/workerpool:
+    config:
+      all: true
+template-data:
+  unroll-variadic: true
