@@ -2,17 +2,11 @@
 
 # Colors used
 NOCOLOR=\033[0m
-INPUTCOLOR=\033[0;36m
 OUTPUTCOLOR=\033[0;32m
-SOMECOLOR=\033[01;31m
 ANOTHERCOLOR=\033[01;34m
 
-PKG := "github.com/LeoNdV001/workerpool"
-PKG_LIST := $(shell go list ${PKG}/... | grep -v .mocks)
 START=@echo "$(ANOTHERCOLOR) > Starting $@ ...$(NOCOLOR)"
 END=@echo "$(OUTPUTCOLOR) > Finished $@ ...$(NOCOLOR)"
-
-makefile: help
 
 .PHONY: help
 ## help: Lists all the make-commands
@@ -25,8 +19,7 @@ help: Makefile
 ## upgrade: Upgrade all go dependencies
 upgrade: | ;
 	$(START)
-	@go clean -modcache
-	@go get -u -d ./...
+	@go get -u ./...
 	@go mod tidy;
 	$(END);
 
@@ -34,24 +27,23 @@ upgrade: | ;
 ## tidy: Runs go mod tidy command
 tidy: | ;
 	$(START)
-	@go clean -modcache
 	@go mod tidy;
+	@cd _examples && go mod tidy;
 	$(END);
 
 .PHONY: test
 ## test: Runs the unit tests
 test: | ;
 	$(START)
-	@go clean -testcache
-	@go test ./... -v -count=1 -failfast;
+	@go test ./... -v -race -count=1 -failfast;
+	@cd _examples && go test ./... -race -count=1 -failfast;
 	$(END);
 
 .PHONY: test-cov
 ## test-cov: Runs test coverage locally
 test-cov: | ;
 	$(START)
-	@go clean -testcache
-	@go test ${PKG_LIST} -coverprofile coverage.out
+	@go test ./... -coverprofile coverage.out
 	@go tool cover -func coverage.out | grep total
 	@go tool cover -html=coverage.out -o coverage.html;
 	$(END);

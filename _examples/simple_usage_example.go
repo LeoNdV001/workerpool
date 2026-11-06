@@ -7,7 +7,7 @@ import (
 )
 
 func example() error {
-	wp := workerpool.NewWorkerPool(context.Background()).UseDefaults().Start()
+	wp := workerpool.NewWorkerPool(context.Background()).Start()
 	defer wp.Quit()
 
 	for i := range uint(10) {

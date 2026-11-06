@@ -70,7 +70,6 @@ func (test *SimpleTestSuite) TestSimplePoolError() {
 // TestSimplePoolMocked tests the SimplePool method
 func (test *SimpleTestSuite) TestSimplePoolMocked() {
 	test.wpm.EXPECT().NewWorkerPool(test.ctx).Return(test.wp).Once()
-	test.wp.EXPECT().UseDefaults().Return(test.wp).Once()
 	test.wp.EXPECT().Start().Return(test.wp).Once()
 	test.wp.EXPECT().Quit().Return().Once()
 	test.wp.EXPECT().AddTask(mock.AnythingOfType("*examples.SimpleTask")).Return(nil).Times(50)
@@ -86,7 +85,6 @@ func (test *SimpleTestSuite) TestSimplePoolMockedError() {
 	expectedErr := fmt.Errorf("expected error")
 
 	test.wpm.EXPECT().NewWorkerPool(test.ctx).Return(test.wp).Once()
-	test.wp.EXPECT().UseDefaults().Return(test.wp).Once()
 	test.wp.EXPECT().Start().Return(test.wp).Once()
 	test.wp.EXPECT().Quit().Return().Once()
 	test.wp.EXPECT().AddTask(mock.AnythingOfType("*examples.SimpleTask")).Return(nil).Times(74)
